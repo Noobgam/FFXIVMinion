@@ -1026,7 +1026,11 @@ function ffxivminion.SetMainVars()
 	FFXIV_Craft_UseHQMats = ffxivminion.GetSetting("FFXIV_Craft_UseHQMats", true)
 	gUseExpManuals = ffxivminion.GetSetting("gUseExpManuals", true)
 	gDeclinePartyInvites = ffxivminion.GetSetting("gDeclinePartyInvites", true)
+	gDeclinePartyInvitesAssist = ffxivminion.GetSetting("gDeclinePartyInvitesAssist", false)
 	gDeclinePartyTeleport = ffxivminion.GetSetting("gDeclinePartyTeleport", true)
+	gDeclinePartyTeleportAssist = ffxivminion.GetSetting("gDeclinePartyTeleportAssist", false)
+	gDeclineTradeRequests = ffxivminion.GetSetting("gDeclineTradeRequests", true)
+	gDeclineTradeRequestsAssist = ffxivminion.GetSetting("gDeclineTradeRequestsAssist", false)
 	gTradeInviteBusy = ffxivminion.GetSetting("gTradeInviteBusy", true)
 	gTradeInviteMessage = ffxivminion.GetSetting("gTradeInviteMessage", false)
 	gTradeInviteMessages = ffxivminion.GetSetting("gTradeInviteMessages", "?;/shrug")
@@ -1772,6 +1776,13 @@ function ffxivminion.LoadModes()
 	ffxivminion.SwitchMode(gBotMode)
 end
 
+-- @param enabled (boolean) Main auto-decline setting.
+-- @param alsoInAssist (boolean) Allow auto-decline in Assist mode.
+-- @return (boolean) Whether this request type should be declined in the current mode.
+function ffxivminion.ShouldDeclineSocialRequest(enabled, alsoInAssist)
+	return toboolean(enabled) and (gBotMode ~= "assistMode" or toboolean(alsoInAssist))
+end
+
 -- clear any addons displayed by social actions like trade/party invites
 function ffxivminion.ClearAddons()
 	local now = Now()
@@ -1780,8 +1791,9 @@ function ffxivminion.ClearAddons()
 		ffxivminion.busyTimer = 0
 	end
 
-	-- assist leaves trades to the player, including any pending close from another mode.
-	if (gBotMode == "assistMode") then
+	local declineTrade = ffxivminion.ShouldDeclineSocialRequest(gDeclineTradeRequests, gDeclineTradeRequestsAssist)
+	-- Disabling rejection also cancels work left pending by the previous mode/settings.
+	if (not declineTrade) then
 		ffxivminion.tradeClosePending = false
 		ffxivminion.tradeBusyPending = false
 	end
@@ -1805,7 +1817,7 @@ function ffxivminion.ClearAddons()
 	end
 
 	-- Trade can open while moving, close it right away.
-	if (tradeOpen and gBotMode ~= "assistMode") then
+	if (tradeOpen and declineTrade) then
 		if (not ffxivminion.tradeClosePending) then
 			ffxivminion.tradeClosePending = true
 			ffxivminion.tradeBusyPending = toboolean(gTradeInviteBusy)
@@ -1834,8 +1846,10 @@ function ffxivminion.ClearAddons()
 		return true
 	end
 
-	local declinePartyInvite = IsControlOpen("_NotificationParty") and toboolean(gDeclinePartyInvites)
-	local declinePartyTeleport = IsControlOpen("_NotificationTelepo") and toboolean(gDeclinePartyTeleport)
+	local declinePartyInvite = IsControlOpen("_NotificationParty")
+		and ffxivminion.ShouldDeclineSocialRequest(gDeclinePartyInvites, gDeclinePartyInvitesAssist)
+	local declinePartyTeleport = IsControlOpen("_NotificationTelepo")
+		and ffxivminion.ShouldDeclineSocialRequest(gDeclinePartyTeleport, gDeclinePartyTeleportAssist)
 	if (declinePartyInvite or declinePartyTeleport) then
 		if (IsControlOpen("SelectYesno")) then
 			if (ffxivminion.declineTimer == 0) then
@@ -2180,6 +2194,41 @@ function ml_global_information.DrawSmall()
 	end
 end
 
+-- Draws and saves one request setting and its dependent Assist setting.
+-- @param label (string) Translated main checkbox label.
+-- @param setting (string) Main setting name.
+-- @param assistSetting (string) Assist setting name.
+-- @param assistOffset (number|nil) Inline position, or nil to wrap onto the next line.
+-- @return nil
+function ffxivminion.DrawSocialDeclineOption(label, setting, assistSetting, assistOffset)
+	GUI_Capture(GUI:Checkbox(label, _G[setting]), setting)
+	if (assistOffset) then
+		GUI:SameLine(assistOffset)
+	else
+		GUI:Indent()
+	end
+
+	local enabled = toboolean(_G[setting])
+	-- The GUI binding has no disabled scope; dim the control and ignore edits.
+	if (not enabled) then
+		GUI:PushStyleVar(GUI.StyleVar_Alpha, GUI:GetStyle().alpha * 0.5)
+		GUI:PushAllowKeyboardFocus(false)
+	end
+	local alsoInAssist = GUI:Checkbox(GetString("Include Assist Mode") .. "##" .. assistSetting, _G[assistSetting])
+	if (enabled) then
+		GUI_Capture(alsoInAssist, assistSetting)
+	else
+		GUI:PopAllowKeyboardFocus()
+		GUI:PopStyleVar()
+	end
+	if (GUI:IsItemHovered()) then
+		GUI:SetTooltip(GetString("Also automatically decline in Assist mode. Requires the main option to be enabled."))
+	end
+	if (not assistOffset) then
+		GUI:Unindent()
+	end
+end
+
 function ml_global_information.DrawSettings()
 	local gamestate = MGetGameState()
 	if (gamestate == FFXIV.GAMESTATE.INGAME) then
@@ -2433,10 +2482,21 @@ function ml_global_information.DrawSettings()
 				end
 
 				if (tabindex == 4) then
-					GUI:BeginChild("##main-header-behavior", 0, GUI_GetFrameHeight(6), true)
+					local tradeLabel = GetString("Decline Trade Requests")
+					local partyLabel = GetString("Decline Party Invites")
+					local teleportLabel = GetString("Decline Party Teleport")
+					local style = GUI:GetStyle()
+					local assistOffset = math.max(GUI:CalcTextSize(tradeLabel), GUI:CalcTextSize(partyLabel), (GUI:CalcTextSize(teleportLabel)))
+						+ GUI:GetFrameHeight() + style.itemspacing.x * 2 + style.windowpadding.x
+					local assistWidth = GUI:CalcTextSize(GetString("Include Assist Mode"))
+					if (assistOffset + assistWidth + GUI:GetFrameHeight() + style.itemspacing.x > GUI:GetContentRegionAvailWidth() - style.windowpadding.x * 2) then
+						assistOffset = nil
+					end
+					GUI:BeginChild("##main-header-behavior", 0, GUI_GetFrameHeight(assistOffset and 7 or 10), true)
 
-					GUI_Capture(GUI:Checkbox(GetString("Decline Party Invites"), gDeclinePartyInvites), "gDeclinePartyInvites");
-					GUI_Capture(GUI:Checkbox(GetString("Decline Party Teleport"), gDeclinePartyTeleport), "gDeclinePartyTeleport");
+					ffxivminion.DrawSocialDeclineOption(tradeLabel, "gDeclineTradeRequests", "gDeclineTradeRequestsAssist", assistOffset)
+					ffxivminion.DrawSocialDeclineOption(partyLabel, "gDeclinePartyInvites", "gDeclinePartyInvitesAssist", assistOffset)
+					ffxivminion.DrawSocialDeclineOption(teleportLabel, "gDeclinePartyTeleport", "gDeclinePartyTeleportAssist", assistOffset)
 					GUI_Capture(GUI:Checkbox(GetString("/busy After Trade invite"), gTradeInviteBusy), "gTradeInviteBusy");
 					GUI_Capture(GUI:Checkbox(GetString("Send Message After Trade Invite."), gTradeInviteMessage), "gTradeInviteMessage");
 					GUI_Capture(GUI:InputText(GetString("Message Options"), gTradeInviteMessages), "gTradeInviteMessages");

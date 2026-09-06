@@ -631,8 +631,8 @@ function ml_global_information.GetYesNoAnswer(answer)
         return nil, "no_control"
     end
 
-    local declinePartyInvites = toboolean(gDeclinePartyInvites)
-    local declinePartyTeleport = toboolean(gDeclinePartyTeleport)
+    local declinePartyInvites = ffxivminion.ShouldDeclineSocialRequest(gDeclinePartyInvites, gDeclinePartyInvitesAssist)
+    local declinePartyTeleport = ffxivminion.ShouldDeclineSocialRequest(gDeclinePartyTeleport, gDeclinePartyTeleportAssist)
     if (declinePartyInvites and IsControlOpen("_NotificationParty")) then
         return "No", "party_invite"
     end
