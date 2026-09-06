@@ -1,5 +1,9 @@
 ffxiv_assist = {}
 
+if (gBypassStartCombat == nil) then
+	gBypassStartCombat = false
+end
+
 ffxiv_task_assist = inheritsFrom(ml_task)
 ffxiv_task_assist.name = "LT_ASSIST"
 function ffxiv_task_assist.Create()
@@ -95,7 +99,7 @@ function ffxiv_task_assist:Process()
 		-- Keep out-of-combat self/preparation actions available, but do not pass an
 		-- idle attackable target to ACRs that ignore SkillMgr's preCombat argument.
 		local hasIdleAttackableTarget = target and target.attackable and not target.incombat
-		local canRunCombatRoutine = gStartCombat or not hasIdleAttackableTarget
+		local canRunCombatRoutine = gBypassStartCombat or gStartCombat or not hasIdleAttackableTarget
 		if not gDisableAssistOptions and ( target and (target.chartype ~= 0 and target.chartype ~= 7) and (target.distance2d <= 30 or gAssistFollowTarget )) then
 			if (canRunCombatRoutine) then
 				
@@ -184,6 +188,9 @@ function ffxiv_task_assist:UIInit()
 		local settingText = string.lower(tostring(startCombatSetting))
 		gStartCombat = (startCombatSetting == 1 or settingText == "1" or settingText == "true")
 		Settings.FFXIVMINION.gStartCombat = gStartCombat
+	end
+	if (gBypassStartCombat == nil) then
+		gBypassStartCombat = false
 	end
 	gAssistAvoidAOE = ffxivminion.GetSetting("gAssistAvoidAOE",false)
 	gAssistConfirmDuty = ffxivminion.GetSetting("gAssistConfirmDuty",false)
@@ -543,7 +550,7 @@ end
 
 -- Helper: pick entity from query; prefers non-boss when gAssistPrioritizeAdds
 local function pickEntity(query)
-	local requireInCombat = not gStartCombat
+	local requireInCombat = not (gStartCombat or gBypassStartCombat)
 	if not gAssistPrioritizeAdds then
 		return firstEntity(query, requireInCombat)
 	end
@@ -598,7 +605,7 @@ function ffxiv_assist.GetAttackTarget()
 
 		if (closest and closest.targetid ~= 0) then
 			local targeted = EntityList:Get(closest.targetid)
-			if (targeted and targeted.attackable and targeted.alive and (gStartCombat or targeted.incombat)) then
+			if (targeted and targeted.attackable and targeted.alive and (gStartCombat or gBypassStartCombat or targeted.incombat)) then
 				target = targeted
 			end
 		end
