@@ -2460,6 +2460,23 @@ function SkillMgr.UpdateChain(prio,castedskill)
 	return false
 end
 
+-- Assist's broad target cutoff; individual skill conditions still decide casts.
+-- @return (number) Highest enabled skill's Target HP below setting, or 0 if unset.
+function SkillMgr.GetHealSpellHPLimit()
+	local highestHPLimit = 0
+	if (SkillMgr.SkillProfile) then
+		for _,skill in pairs(SkillMgr.SkillProfile) do
+			if (skill.used ~= false) then
+				local limit = tonumber(skill.thpb) or 0
+				if (limit > highestHPLimit) then
+					highestHPLimit = limit
+				end
+			end
+		end
+	end
+	return highestHPLimit
+end
+
 function SkillMgr.GetTankableTarget( range )
 	local range = range or ml_global_information.AttackRange
 	local closest = nil

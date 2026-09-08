@@ -504,14 +504,17 @@ function e_assistsyncfatelevel:execute()
 end
 
 function ffxiv_assist.GetHealingTarget()
+    local hpLimit = SkillMgr.GetHealSpellHPLimit()
+    if (hpLimit <= 0) then return nil end
+
     local target = nil
     if ( FFXIV_Assist_Mode == GetString("lowestHealth")) then	
-        target = GetBestHealTarget()		
+        target = GetBestHealTarget(nil, nil, hpLimit)
     elseif ( FFXIV_Assist_Mode == GetString("nearest") ) then	
         target = GetClosestHealTarget()	
     end
     
-    if ( target and target.hp.percent < SkillMgr.GetHealSpellHPLimit() ) then
+    if ( target and target.hp.percent <= hpLimit ) then
         return target
     end
 	
