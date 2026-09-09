@@ -4429,7 +4429,7 @@ local function get_shopping_task_itemid(task)
 
 	local itemtable = task.itemid
 	if (ValidTable(itemtable)) then
-		return itemtable[Player.job] or itemtable[-1]
+		return tonumber(itemtable[Player.job] or itemtable[-1])
 	end
 
 	local itemid = tonumber(itemtable)
@@ -4493,9 +4493,19 @@ local function has_completed_purchase(task, itemid)
 		return false
 	end
 
-	local itemcount = get_shopping_task_count(task, itemid)
-	local needed = (task.startingCount or 0) + (tonumber(task.buyamount) or 1)
-	return itemcount >= needed
+	return c_buy.GetRemainingAmount(task, itemid) == 0
+end
+
+-- Remaining items, before the per-transaction cap. Zero/nil means ensure one
+-- item is owned, matching the shopping and quest-vendor completion checks.
+function c_buy.GetRemainingAmount(task, itemid)
+	if not task or not itemid then return 0 end
+	local amount = tonumber(task and task.buyamount) or 0
+	if amount ~= amount or amount == math.huge or amount == -math.huge then amount = 0 end
+	local target = 1
+	if amount > 0 then target = (tonumber(task.startingCount) or 0) + math.ceil(amount) end
+	if not task.setup then return amount > 0 and math.ceil(amount) or 1 end
+	return math.max(0, target - get_shopping_task_count(task, itemid))
 end
 
 local function handle_buy_failure(task, itemid)
@@ -4512,16 +4522,88 @@ local function handle_buy_failure(task, itemid)
 	end
 end
 
+-- Progress tracking is opt-in for tasks that provide purchaseProgressTimeoutMs.
+-- Capture the count before dispatch: accepting a UI command is not delivery.
+function c_buy.BeginPurchase(task, itemid)
+	task._purchaseShopWaitAt = nil
+	if (tonumber(task.purchaseProgressTimeoutMs) or 0) > 0 and not task._purchaseAttempt then
+		task._purchaseAttempt = {itemid=itemid, count=get_shopping_task_count(task, itemid), started=Now()}
+	end
+end
+
+function c_buy.FailPurchase(task, itemid)
+	task._purchaseAttempt = nil
+	task._purchaseShopWaitAt = nil
+	mark_purchase_attempt(itemid)
+	handle_buy_failure(task, itemid)
+end
+
+-- Returns whether another purchase must wait. Confirmations may still run
+-- while pending; neither confirmations nor timeouts extend this deadline.
+function c_buy.CheckPurchaseProgress(task, itemid)
+	local attempt = task._purchaseAttempt
+	if not attempt then return false end
+	if attempt.itemid ~= itemid then
+		task._purchaseAttempt = nil
+		return false
+	end
+	if get_shopping_task_count(task, itemid) > attempt.count then
+		task._purchaseAttempt = nil
+		task.failedpurchaseattempts = 0
+		mark_purchase_attempt(itemid)
+		if task.onPurchaseProgress then task.onPurchaseProgress(task, itemid) end
+		return false
+	end
+	if TimeSince(attempt.started) >= (tonumber(task.purchaseProgressTimeoutMs) or 8000) then
+		c_buy.FailPurchase(task, itemid)
+		return true, true
+	end
+	return true, false
+end
+
+-- Allow category/item data to arrive without freezing the live row lookup.
+function c_buy.WaitForShop(task, itemid)
+	local timeout = tonumber(task.purchaseProgressTimeoutMs) or 0
+	if timeout <= 0 then return false end
+	task._purchaseShopWaitAt = task._purchaseShopWaitAt or Now()
+	if TimeSince(task._purchaseShopWaitAt) >= timeout then
+		c_buy.FailPurchase(task, itemid)
+		return true
+	end
+	return false
+end
+
+-- A delayed/orphaned confirmation still needs a delivery deadline. Do not
+-- accept another purchase after this task's quantity has already been met.
+function c_buy.PrepareConfirmation(task, itemid, name)
+	if (tonumber(task.purchaseProgressTimeoutMs) or 0) > 0 and has_completed_purchase(task, itemid) then
+		if name == "ShopExchangeItemDialog" then
+			local control = GetControl(name)
+			if control then control:Close() end
+		else
+			UseControlAction(name, "No")
+		end
+		return false
+	end
+	c_buy.BeginPurchase(task, itemid)
+	return true
+end
+
 c_confirmbuy = inheritsFrom( ml_cause )
 e_confirmbuy = inheritsFrom( ml_effect )
 function c_confirmbuy:evaluate()
 	local currentTask = ml_task_hub:CurrentTask()
 	local itemid = get_shopping_task_itemid(currentTask)
+	if not currentTask or not itemid or itemid <= 0 then return false end
+	if currentTask.purchaseFailed then return true end
 	if itemid and currentTask.lastBuyItemID ~= itemid then
 		currentTask.lastBuyItemID = itemid
 	end
+	local _, timedOut = c_buy.CheckPurchaseProgress(currentTask, itemid)
+	if timedOut then return true end
 
 	if IsControlOpen("SelectYesno") then
+		if not c_buy.PrepareConfirmation(currentTask, itemid, "SelectYesno") then return true end
 		local safeAnswer = ml_global_information.GetYesNoAnswer(true)
 		if (safeAnswer == "Yes") then
 			UseControlAction("SelectYesno","CheckAccept")
@@ -4529,7 +4611,7 @@ function c_confirmbuy:evaluate()
 		local handled, actualAnswer = PressYesNo(true)
 		if (handled and actualAnswer == "Yes") then
 			ml_global_information.Await(1500, function () return not IsControlOpen("SelectYesno") end)
-			currentTask.failedpurchaseattempts = 0
+			if not currentTask.purchaseProgressTimeoutMs then currentTask.failedpurchaseattempts = 0 end
 			mark_purchase_settled(currentTask, itemid, false)
 			return true
 		end
@@ -4537,18 +4619,20 @@ function c_confirmbuy:evaluate()
 	end
 
 	if IsControlOpen("ShopExchangeItemDialog") then
+		if not c_buy.PrepareConfirmation(currentTask, itemid, "ShopExchangeItemDialog") then return true end
 		UseControlAction("ShopExchangeItemDialog","Exchange")
 		ml_global_information.Await(1500, function () return not IsControlOpen("ShopExchangeItemDialog") end)
-		currentTask.failedpurchaseattempts = 0
+		if not currentTask.purchaseProgressTimeoutMs then currentTask.failedpurchaseattempts = 0 end
 		mark_purchase_settled(currentTask, itemid, true)
 		return true
 	end
 
 	if IsControlOpen("SelectYesnoCount") then
+		if not c_buy.PrepareConfirmation(currentTask, itemid, "SelectYesnoCount") then return true end
 		UseControlAction("SelectYesnoCount","CheckAccept")
 		UseControlAction("SelectYesnoCount","Yes")
 		ml_global_information.Await(1000, function () return not IsControlOpen("SelectYesnoCount") end)
-		currentTask.failedpurchaseattempts = 0
+		if not currentTask.purchaseProgressTimeoutMs then currentTask.failedpurchaseattempts = 0 end
 		mark_purchase_settled(currentTask, itemid, false)
 		return true
 	end
@@ -4562,12 +4646,18 @@ end
 function c_buy:evaluate()
 	local currentTask = ml_task_hub:CurrentTask()
 	local itemid = get_shopping_task_itemid(currentTask)
+	if not currentTask or not itemid or itemid <= 0 then return false end
+	if currentTask.purchaseFailed then return true end
+	if currentTask.requirePurchaseSetup and not currentTask.setup then return false end
 	if itemid and currentTask.lastBuyItemID ~= itemid then
 		currentTask.lastBuyItemID = itemid
 		currentTask.failedpurchaseattempts = 0
 	end
+	local purchasePending, purchaseTimedOut = c_buy.CheckPurchaseProgress(currentTask, itemid)
+	if purchaseTimedOut then return true end
 
 	if (IsControlOpen("SelectYesno")) then
+		if not c_buy.PrepareConfirmation(currentTask, itemid, "SelectYesno") then return true end
 		local safeAnswer = ml_global_information.GetYesNoAnswer(true)
 		if (safeAnswer == "Yes") then
 			UseControlAction("SelectYesno","CheckAccept")
@@ -4582,6 +4672,7 @@ function c_buy:evaluate()
 	end
 	
 	if (IsControlOpen("SelectYesnoCount")) then
+		if not c_buy.PrepareConfirmation(currentTask, itemid, "SelectYesnoCount") then return true end
 		UseControlAction("SelectYesnoCount","CheckAccept")
 		UseControlAction("SelectYesnoCount","Yes")
 		ml_global_information.Await(1000, function () return not IsControlOpen("SelectYesnoCount") end)
@@ -4590,11 +4681,13 @@ function c_buy:evaluate()
 	end
 
 	if IsControlOpen("ShopExchangeItemDialog") then
+		if not c_buy.PrepareConfirmation(currentTask, itemid, "ShopExchangeItemDialog") then return true end
 		UseControlAction("ShopExchangeItemDialog","Exchange")
 		ml_global_information.Await(1500, function () return not IsControlOpen("ShopExchangeItemDialog") end)
 		mark_purchase_settled(currentTask, itemid, true)
 		return true
 	end
+	if purchasePending then return true end
 
 	if IsControlOpen("GrandCompanyExchange") then
 		if not itemid then
@@ -4609,6 +4702,7 @@ function c_buy:evaluate()
 			return false
 		end
 
+		if c_buy.WaitForShop(currentTask, itemid) then return true end
 		local gcData = GetControlData("GrandCompanyExchange", "items")
 		if not gcData then
 			return false
@@ -4618,6 +4712,8 @@ function c_buy:evaluate()
 		local wantRank = currentTask.gcRankIndex or 0
 		local key = table.findval(gcData, "itemid", itemid)
 		if key then
+			c_buy.BeginPurchase(currentTask, itemid)
+			mark_purchase_attempt(itemid)
 			UseControlAction("GrandCompanyExchange", "SelectItem", key - 1)
 			ml_global_information.Await(1500)
 			return true
@@ -4652,6 +4748,7 @@ function c_buy:evaluate()
 	end
 
 	if IsControlOpen("InclusionShop") then
+		if c_buy.WaitForShop(currentTask, itemid) then return true end
 		local shopItems = GetControlData("InclusionShop", "InclusionShop")
 		local wantCategory = tonumber(currentTask.category)
 		local wantSubcategory = tonumber(currentTask.subcategory)
@@ -4709,12 +4806,11 @@ function c_buy:evaluate()
 		end
 	end
 	if (itemid) then
-		local buyamount = ml_task_hub:CurrentTask().buyamount or 1
-		if (buyamount > 99) then
-			buyamount = 99
-		end
+		local buyamount = math.min(99, c_buy.GetRemainingAmount(currentTask, itemid))
+		if buyamount <= 0 then return false end
 		
 		if IsControlOpen("InclusionShop") and currentTask.itemindex then
+			c_buy.BeginPurchase(currentTask, itemid)
 			UseControlAction("InclusionShop", "BuyShopItem", {[1] = currentTask.itemindex, [2] = buyamount})
 			mark_purchase_attempt(itemid)
 			local confirmedExchange = false
@@ -4727,15 +4823,16 @@ function c_buy:evaluate()
 					end
 				end
 			)
-			currentTask.failedpurchaseattempts = 0
+			if not currentTask.purchaseProgressTimeoutMs then currentTask.failedpurchaseattempts = 0 end
 			if confirmedExchange then
 				mark_purchase_settled(currentTask, itemid, true)
 			end
 		else
+			c_buy.BeginPurchase(currentTask, itemid)
 			local result = Inventory:BuyShopItem(itemid,buyamount)
 			if result then
 				mark_purchase_attempt(itemid)
-				currentTask.failedpurchaseattempts = 0
+				if not currentTask.purchaseProgressTimeoutMs then currentTask.failedpurchaseattempts = 0 end
 				local confirmedPurchase = false
 				ml_global_information.AwaitSuccess(2000, 
 					function () 
@@ -4750,7 +4847,7 @@ function c_buy:evaluate()
 					mark_purchase_settled(currentTask, itemid, false)
 				end
 			else
-				handle_buy_failure(currentTask, itemid)
+				c_buy.FailPurchase(currentTask, itemid)
 			end
 		end
 	end
@@ -5131,6 +5228,29 @@ local function c_dointeract_fireInteract(task, interactable, source)
 	return true
 end
 
+-- A vendor may supply a measured mesh approach. Keep standard pathing and
+-- discard the point if the NPC moves or a profile overrides the destination.
+-- @param task (table) Interaction task. @param entity (table|nil) Current NPC.
+-- @return (table|nil) Valid approach for this NPC on this map.
+function c_dointeract.GetInteractionApproach(task, entity)
+	local point = task.interactionApproachPos
+	if not point then return nil end
+	if task.useTargetPos or task.useProfilePos then
+		task.interactionApproachPos = nil
+		task.pathChecked = false
+		return nil
+	end
+	if task.interactionApproachMap ~= Player.localmapid
+		or (entity and entity.pos and (not task.interactionApproachTarget
+			or math.distance3d(entity.pos, task.interactionApproachTarget) > 1)) then
+		task.interactionApproachPos = nil
+		task.pathChecked = false
+		if entity and entity.pos then task.pos = entity.pos end
+		return nil
+	end
+	return point
+end
+
 function c_dointeract:evaluate()
 	local task = ml_task_hub:CurrentTask()
 	local myTarget = MGetTarget()
@@ -5260,8 +5380,11 @@ function c_dointeract:evaluate()
 	-------------------------------------------------------------------
 	-- Position update from entity
 	-------------------------------------------------------------------
+	local interactionApproach = c_dointeract.GetInteractionApproach(task, interactable)
 	if (interactable) then
-		if (task.useTargetPos) then
+		if interactionApproach then
+			task.pos = interactionApproach
+		elseif (task.useTargetPos) then
 			task.pos = interactable.pos
 		elseif (not task.useProfilePos) then
 			if (interactable.meshpos and not IsFlying() and not IsDiving()) then
@@ -5534,7 +5657,7 @@ function c_dointeract:evaluate()
 				return true
 			end
 			if (not Player:IsMoving()) then
-				local epos = interactable.pos
+				local epos = interactionApproach or interactable.pos
 				Player:MoveTo(epos.x, epos.y, epos.z)
 			end
 			return true
@@ -5571,7 +5694,7 @@ function c_dointeract:evaluate()
 		end
 		if (not IsFlying() and not IsDiving() and not IsDismounting() and (withinPlanar or within3d)) then
 			if (not Player:IsMoving()) then
-				local epos = interactable.pos
+				local epos = interactionApproach or interactable.pos
 				Player:MoveTo(epos.x, epos.y, epos.z)
 			end
 			return true
