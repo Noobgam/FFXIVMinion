@@ -68,6 +68,11 @@ function ffxivminion.RefreshLoginData()
 			local dcIdx = GetKeyByValue(FFXIV_Login_DataCenterName, ffxivminion.logincenters)
 			FFXIV_Login_DataCenter = IsNull(dcIdx, 1)
 		end
+		-- KR/TW enter their sole DC directly; no saved DC selection is required.
+		if (region == 3 or region == 4) and #centers == 2 then
+			FFXIV_Login_DataCenter = 2
+			FFXIV_Login_DataCenterName = centers[2]
+		end
 		-- Re-resolve server index for current saved name
 		-- Use SettingsUUID as authoritative source since FFXIV_Login_ServerName
 		-- may have been clobbered by SetMainVars before data loaded
@@ -927,6 +932,11 @@ function ffxivminion.SetMainVars()
 	FFXIV_Login_DataCenterName = SettingsUUID.Login.DataCenter
 	local dcMatchIdx = GetKeyByValue(FFXIV_Login_DataCenterName, ffxivminion.logincenters)
 	FFXIV_Login_DataCenter = IsNull(dcMatchIdx, 1)
+	-- RefreshLoginData may have completed before saved settings were restored.
+	if (ffxivminion.gameRegion == 3 or ffxivminion.gameRegion == 4) and #ffxivminion.logincenters == 2 then
+		FFXIV_Login_DataCenter = 2
+		FFXIV_Login_DataCenterName = ffxivminion.logincenters[2]
+	end
 
 	---Server
 	if not SettingsUUID.Login.Server then
@@ -2637,13 +2647,15 @@ function ml_global_information.DrawSettings()
 
 					ffxivminion.RefreshLoginData()
 					GUI:PushItemWidth(120)
-					local dcChanged = GUI_Combo("DataCenter", "FFXIV_Login_DataCenter", "FFXIV_Login_DataCenterName", ffxivminion.logincenters)
-					if (dcChanged) then
-						SettingsUUID.Login.DataCenter = FFXIV_Login_DataCenterName
-						GUI_Set("FFXIV_Login_Server", 1)
-						GUI_Set("FFXIV_Login_ServerName", "")
-						SettingsUUID.Login.Server = FFXIV_Login_ServerName
-						ffxivminion.loginvars.datacenterSelected = false
+					if (ffxivminion.gameRegion ~= 3 and ffxivminion.gameRegion ~= 4) or #ffxivminion.logincenters > 2 then
+						local dcChanged = GUI_Combo("DataCenter", "FFXIV_Login_DataCenter", "FFXIV_Login_DataCenterName", ffxivminion.logincenters)
+						if (dcChanged) then
+							SettingsUUID.Login.DataCenter = FFXIV_Login_DataCenterName
+							GUI_Set("FFXIV_Login_Server", 1)
+							GUI_Set("FFXIV_Login_ServerName", "")
+							SettingsUUID.Login.Server = FFXIV_Login_ServerName
+							ffxivminion.loginvars.datacenterSelected = false
+						end
 					end
 
 					if (table.valid(ffxivminion.loginservers[FFXIV_Login_DataCenter])) then
@@ -2793,14 +2805,16 @@ function ml_global_information.DrawLoginHandler()
 
 			ffxivminion.RefreshLoginData()
 			GUI:PushItemWidth(120)
-			local dcChanged = GUI_Combo("DataCenter", "FFXIV_Login_DataCenter", "FFXIV_Login_DataCenterName", ffxivminion.logincenters)
-			if (dcChanged) then
-				SettingsUUID.Login.DataCenter = FFXIV_Login_DataCenterName
-				GUI_Set("FFXIV_Login_Server", 1)
-				GUI_Set("FFXIV_Login_ServerName", "")
-				SettingsUUID.Login.Server = FFXIV_Login_ServerName
-				ffxivminion.loginvars.datacenterSelected = false
-				ffxivminion.loginvars.dcSet = false
+			if (ffxivminion.gameRegion ~= 3 and ffxivminion.gameRegion ~= 4) or #ffxivminion.logincenters > 2 then
+				local dcChanged = GUI_Combo("DataCenter", "FFXIV_Login_DataCenter", "FFXIV_Login_DataCenterName", ffxivminion.logincenters)
+				if (dcChanged) then
+					SettingsUUID.Login.DataCenter = FFXIV_Login_DataCenterName
+					GUI_Set("FFXIV_Login_Server", 1)
+					GUI_Set("FFXIV_Login_ServerName", "")
+					SettingsUUID.Login.Server = FFXIV_Login_ServerName
+					ffxivminion.loginvars.datacenterSelected = false
+					ffxivminion.loginvars.dcSet = false
+				end
 			end
 
 			if (table.valid(ffxivminion.loginservers[FFXIV_Login_DataCenter])) then

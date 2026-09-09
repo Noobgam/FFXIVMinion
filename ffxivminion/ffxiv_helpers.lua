@@ -3039,7 +3039,8 @@ function IsMeleeDPS(var)
 			jobid == FFXIV.JOBS.NINJA or 
 			jobid == FFXIV.JOBS.SAMURAI or
 			jobid == FFXIV.JOBS.REAPER or
-			jobid == FFXIV.JOBS.VIPER)
+			jobid == FFXIV.JOBS.VIPER or
+			jobid == FFXIV.JOBS.BEASTMASTER)
 end
 function IsRangedDPS(var)
 	local var = IsNull(var,Player)
@@ -3115,7 +3116,8 @@ function IsPhysicalDPS(var)
 			jobid == FFXIV.JOBS.DANCER or
 			jobid == FFXIV.JOBS.MACHINIST or
 			jobid == FFXIV.JOBS.REAPER or
-			jobid == FFXIV.JOBS.VIPER)
+			jobid == FFXIV.JOBS.VIPER or
+			jobid == FFXIV.JOBS.BEASTMASTER)
 end
 function IsCasterDPS(var)
 	local var = IsNull(var,Player)

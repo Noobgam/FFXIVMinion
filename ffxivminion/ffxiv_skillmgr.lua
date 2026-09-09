@@ -754,6 +754,7 @@ function SkillMgr.ModuleInit()
 	gSkillProfileValidSGE = false
 	gSkillProfileValidVPR = false
 	gSkillProfileValidPCT = false
+	gSkillProfileValidBST = false
 	
 	gSkillProfileValidMIN = false
 	gSkillProfileValidBTN = false
@@ -1497,6 +1498,7 @@ function SkillMgr.ReadFile(strFile)
 	gSkillProfileValidSGE = IsNull(classes[FFXIV.JOBS.SAGE],false)
 	gSkillProfileValidVPR = IsNull(classes[FFXIV.JOBS.VIPER],false) 
 	gSkillProfileValidPCT = IsNull(classes[FFXIV.JOBS.PICTOMANCER],false) 
+	gSkillProfileValidBST = IsNull(classes[FFXIV.JOBS.BEASTMASTER],false)
 	
 	gSkillProfileValidMIN = IsNull(classes[FFXIV.JOBS.MINER],false) 
 	gSkillProfileValidBTN = IsNull(classes[FFXIV.JOBS.BOTANIST],false) 
@@ -1587,6 +1589,7 @@ function SkillMgr.WriteToFile(strFile)
 		[FFXIV.JOBS.SAGE] = IsNull(gSkillProfileValidSGE,false), 
 		[FFXIV.JOBS.VIPER] = IsNull(gSkillProfileValidVPR,false),
 		[FFXIV.JOBS.PICTOMANCER] = IsNull(gSkillProfileValidPCT,false),
+		[FFXIV.JOBS.BEASTMASTER] = IsNull(gSkillProfileValidBST,false),
 		
 		[FFXIV.JOBS.MINER] = IsNull(gSkillProfileValidMIN,false),
 		[FFXIV.JOBS.BOTANIST] = IsNull(gSkillProfileValidBTN,false),

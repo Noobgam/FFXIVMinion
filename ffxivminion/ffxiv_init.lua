@@ -5,6 +5,9 @@ end
 if (FFXIV.JOBS.PICTOMANCER == nil) then
 	FFXIV.JOBS.PICTOMANCER = 42
 end
+if (FFXIV.JOBS.BEASTMASTER == nil) then
+	FFXIV.JOBS.BEASTMASTER = 43
+end
 
 ml_global_information.path = GetStartupPath()
 ml_global_information.Now = 0

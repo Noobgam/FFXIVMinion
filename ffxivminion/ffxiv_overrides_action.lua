@@ -157,6 +157,7 @@ function FFXIVMinionAction.GetRepresentativeGCD(jobId, pvp, level)
 	if id == 40 then return 24283 end -- SGE: Dosis
 	if id == 41 then return 34606 end -- VPR: Steel Fangs
 	if id == 42 then return 34650 end -- PCT: Fire in Red
+	if id == 43 then return 44879 end -- BST: Smash Axe
 	return nil
 end
 
@@ -228,6 +229,7 @@ function FFXIVMinionAction.GetTestSkill(jobId, pvp)
 	if id == 40 then return 24283 end -- SGE: Dosis
 	if id == 41 then return 34606 end -- VPR: Steel Fangs
 	if id == 42 then return 34650 end -- PCT: Fire in Red
+	if id == 43 then return 44879 end -- BST: Smash Axe
 	return nil
 
 end
