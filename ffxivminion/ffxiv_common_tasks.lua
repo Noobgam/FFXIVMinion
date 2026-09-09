@@ -3134,17 +3134,22 @@ function ffxiv_task_moveaethernet:task_complete_eval()
 		end
 	end
 	
-	local myTarget = MGetTarget()
 	local ppos = Player.pos
 	
-	if (self.useAethernet and (MIsLoading() or self.startMap ~= Player.localmapid)) then
-		if (MIsLoading()) then
-			-- Use Player.pos if self.initiatedPos is an empty table
-			local initiatedPos = table.valid(self.initiatedPos) and self.initiatedPos or Player.pos
-			d("Triggering wait for full load-in.")
-			ml_global_information.Await(10000, function () return (Player and not Busy() and math.distance3d(initiatedPos,Player.pos) > 10) end)
+	if (self.useAethernet and not self.unlockAethernet) then
+		local initiatedPos = self.initiatedPos
+		if (not table.valid(initiatedPos) or initiatedPos.x == nil
+			or initiatedPos.y == nil or initiatedPos.z == nil) then
+			-- Foundation: within 5y of the approach but outside the 10y crystal query, before selecting a destination.
+			return false
 		end
-		return true
+		if (MIsLoading() or Busy() or Player.localmapid == 0
+			or IsControlOpen("TelepotTown") or IsControlOpen("SelectString")
+			or IsControlOpen("SelectIconString")) then
+			-- After selection, loading can report map 0 (different from startMap) before actual arrival.
+			return false
+		end
+		return (self.startMap ~= Player.localmapid or math.distance3d(initiatedPos,ppos) > 10)
 	elseif (self.unlockAethernet) then
 		local attuned = FFXIVLib.API.Map.GetAetherytes(1)
 		if attuned and attuned[self.contentid] then
